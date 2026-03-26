@@ -1,0 +1,564 @@
+{
+  "name": "Slack Interaction — Approval Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-interaction",
+        "responseMode": "onReceived",
+        "responseData": "",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-interaction",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [200, 300],
+      "webhookId": "slack-interaction-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Slack sends interactions as form-encoded with a 'payload' field\nconst payload = JSON.parse($input.first().json.body.payload);\n\nconst action = payload.actions[0];\nconst actionId = action.action_id;\nconst user = payload.user.name;\nconst userId = payload.user.id;\nconst responseUrl = payload.response_url;\nconst messageTs = payload.message.ts;\nconst channelId = payload.channel.id;\n\n// Parse the action to extract type and reply_id\nlet actionType = '';\nlet replyId = '';\n\nif (actionId.startsWith('approve_')) {\n  actionType = 'approve';\n  replyId = actionId.replace('approve_', '');\n} else if (actionId.startsWith('reject_')) {\n  actionType = 'reject';\n  replyId = actionId.replace('reject_', '');\n} else if (actionId.startsWith('followup_approve_')) {\n  actionType = 'followup_approve';\n  replyId = actionId.replace('followup_approve_', '');\n} else if (actionId.startsWith('followup_skip_')) {\n  actionType = 'followup_skip';\n  replyId = actionId.replace('followup_skip_', '');\n}\n\nreturn [\n  {\n    json: {\n      actionType,\n      replyId,\n      actionId,\n      user,\n      userId,\n      responseUrl,\n      messageTs,\n      channelId,\n      rawPayload: payload\n    }\n  }\n];"
+      },
+      "id": "parse-payload",
+      "name": "Parse Slack Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-approve",
+              "leftValue": "={{ $json.actionType }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-approve",
+      "name": "Is Approve?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_PUBLIC_URL }}/api/send-reply",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ reply_id: $json.replyId }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "http-send-reply",
+      "name": "Send Reply via Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [940, 180]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEETS_ID }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Audit Log"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "reply_id": "={{ $('Parse Slack Payload').item.json.replyId }}",
+            "lead_email": "={{ $('Parse Slack Payload').item.json.rawPayload.message.text }}",
+            "campaign": "",
+            "category": "",
+            "action": "approved",
+            "approved_by": "={{ $('Parse Slack Payload').item.json.user }}",
+            "timestamp": "={{ new Date().toISOString() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "reply_id", "displayName": "reply_id", "required": false, "defaultMatch": false, "canBeUsedToMatch": true, "display": true, "type": "string" },
+            { "id": "lead_email", "displayName": "lead_email", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "display": true, "type": "string" },
+            { "id": "campaign", "displayName": "campaign", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "display": true, "type": "string" },
+            { "id": "category", "displayName": "category", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "display": true, "type": "string" },
+            { "id": "action", "displayName": "action", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "display": true, "type": "string" },
+            { "id": "approved_by", "displayName": "approved_by", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "display": true, "type": "string" },
+            { "id": "timestamp", "displayName": "timestamp", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "display": true, "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gsheets-log-approve",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.3,
+      "position": [1180, 180],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "update",
+        "channel": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Parse Slack Payload').item.json.channelId }}"
+        },
+        "ts": "={{ $('Parse Slack Payload').item.json.messageTs }}",
+        "text": ":white_check_mark: *Approved* by {{ $('Parse Slack Payload').item.json.user }}",
+        "updateFields": {
+          "blocksUi": {
+            "blocksValues": [
+              {
+                "type": "section",
+                "textValue": ":white_check_mark: *Approved* by <@{{ $('Parse Slack Payload').item.json.userId }}>\n\nReply ID: `{{ $('Parse Slack Payload').item.json.replyId }}`\nAction taken at: {{ new Date().toISOString() }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "slack-update-approve",
+      "name": "Slack — Mark Approved",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1420, 180],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIAL_ID",
+          "name": "Slack Bot Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-reject",
+              "leftValue": "={{ $json.actionType }}",
+              "rightValue": "reject",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-reject",
+      "name": "Is Reject?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [940, 440]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.BACKEND_PUBLIC_URL }}/api/replies/{{ $json.replyId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'rejected' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "http-reject-reply",
+      "name": "Reject Reply via Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1180, 380]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "update",
+        "channel": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Parse Slack Payload').item.json.channelId }}"
+        },
+        "ts": "={{ $('Parse Slack Payload').item.json.messageTs }}",
+        "text": ":x: *Rejected* by {{ $('Parse Slack Payload').item.json.user }}",
+        "updateFields": {
+          "blocksUi": {
+            "blocksValues": [
+              {
+                "type": "section",
+                "textValue": ":x: *Rejected* by <@{{ $('Parse Slack Payload').item.json.userId }}>\n\nReply ID: `{{ $('Parse Slack Payload').item.json.replyId }}`\nAction taken at: {{ new Date().toISOString() }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "slack-update-reject",
+      "name": "Slack — Mark Rejected",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1420, 380],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIAL_ID",
+          "name": "Slack Bot Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-followup-approve",
+              "leftValue": "={{ $json.actionType }}",
+              "rightValue": "followup_approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-followup-approve",
+      "name": "Is Follow-Up Approve?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [940, 620]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_PUBLIC_URL }}/api/send-followup",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ followup_id: $json.replyId }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "http-send-followup",
+      "name": "Send Follow-Up via Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1180, 560]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "update",
+        "channel": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Parse Slack Payload').item.json.channelId }}"
+        },
+        "ts": "={{ $('Parse Slack Payload').item.json.messageTs }}",
+        "text": ":arrow_forward: *Follow-up approved* by {{ $('Parse Slack Payload').item.json.user }}",
+        "updateFields": {
+          "blocksUi": {
+            "blocksValues": [
+              {
+                "type": "section",
+                "textValue": ":arrow_forward: *Follow-up approved* by <@{{ $('Parse Slack Payload').item.json.userId }}>\n\nFollow-up ID: `{{ $('Parse Slack Payload').item.json.replyId }}`\nAction taken at: {{ new Date().toISOString() }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "slack-update-followup-approve",
+      "name": "Slack — Follow-Up Approved",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1420, 560],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIAL_ID",
+          "name": "Slack Bot Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-followup-skip",
+              "leftValue": "={{ $json.actionType }}",
+              "rightValue": "followup_skip",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-followup-skip",
+      "name": "Is Follow-Up Skip?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [940, 800]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.BACKEND_PUBLIC_URL }}/api/followups/{{ $json.replyId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'skipped' }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "http-skip-followup",
+      "name": "Skip Follow-Up via Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1180, 740]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "update",
+        "channel": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Parse Slack Payload').item.json.channelId }}"
+        },
+        "ts": "={{ $('Parse Slack Payload').item.json.messageTs }}",
+        "text": ":fast_forward: *Follow-up skipped* by {{ $('Parse Slack Payload').item.json.user }}",
+        "updateFields": {
+          "blocksUi": {
+            "blocksValues": [
+              {
+                "type": "section",
+                "textValue": ":fast_forward: *Follow-up skipped* by <@{{ $('Parse Slack Payload').item.json.userId }}>\n\nFollow-up ID: `{{ $('Parse Slack Payload').item.json.replyId }}`\nAction taken at: {{ new Date().toISOString() }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "slack-update-followup-skip",
+      "name": "Slack — Follow-Up Skipped",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1420, 740],
+      "credentials": {
+        "slackApi": {
+          "id": "SLACK_CREDENTIAL_ID",
+          "name": "Slack Bot Token"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Slack Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Slack Payload": {
+      "main": [
+        [
+          {
+            "node": "Is Approve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Approve?": {
+      "main": [
+        [
+          {
+            "node": "Send Reply via Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Reject?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reply via Backend": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Slack — Mark Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Reject?": {
+      "main": [
+        [
+          {
+            "node": "Reject Reply via Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Follow-Up Approve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reject Reply via Backend": {
+      "main": [
+        [
+          {
+            "node": "Slack — Mark Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Follow-Up Approve?": {
+      "main": [
+        [
+          {
+            "node": "Send Follow-Up via Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Follow-Up Skip?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow-Up via Backend": {
+      "main": [
+        [
+          {
+            "node": "Slack — Follow-Up Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Follow-Up Skip?": {
+      "main": [
+        [
+          {
+            "node": "Skip Follow-Up via Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Skip Follow-Up via Backend": {
+      "main": [
+        [
+          {
+            "node": "Slack — Follow-Up Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "ai-inbox-manager"
+  },
+  "tags": [
+    {
+      "name": "inbox-manager",
+      "createdAt": "2026-03-26T00:00:00.000Z",
+      "updatedAt": "2026-03-26T00:00:00.000Z"
+    }
+  ]
+}
