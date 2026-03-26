@@ -1,28 +1,28 @@
-"""AI-powered email classification and draft generation using GPT-4o-mini."""
+"""AI-powered email classification and draft generation using Claude Sonnet 4.6."""
 
 import logging
 from pathlib import Path
 from typing import Optional
 
-from openai import AsyncOpenAI
+import anthropic
 
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Lazy-initialise the OpenAI client so the module can be imported even when
-# the API key is not yet set (e.g. during testing).
-_client: Optional[AsyncOpenAI] = None
+_client: Optional[anthropic.AsyncAnthropic] = None
 
 
-def _get_client() -> AsyncOpenAI:
+def _get_client() -> anthropic.AsyncAnthropic:
     global _client
     if _client is None:
-        if not settings.OPENAI_API_KEY:
-            raise RuntimeError("OPENAI_API_KEY is not configured")
-        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        if not settings.ANTHROPIC_API_KEY:
+            raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+        _client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     return _client
 
+
+MODEL = "claude-sonnet-4-6-20250514"
 
 VALID_CATEGORIES = [
     "interested",
@@ -56,26 +56,26 @@ def _load_file(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 async def classify_reply(reply_text: str) -> str:
-    """Classify an email reply into one of the standard categories using GPT-4o-mini.
+    """Classify an email reply into one of the standard categories using Claude.
 
     Returns one of: interested, not_interested, ooo, unsubscribe,
     info_request, wrong_person, dnc.
     """
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = await client.messages.create(
+            model=MODEL,
+            max_tokens=20,
+            temperature=0,
+            system=CLASSIFICATION_SYSTEM_PROMPT,
             messages=[
-                {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
                 {"role": "user", "content": reply_text},
             ],
-            temperature=0,
-            max_tokens=20,
         )
-        category = response.choices[0].message.content.strip().lower()
+        category = response.content[0].text.strip().lower()
         if category not in VALID_CATEGORIES:
             logger.warning(
-                "GPT returned unexpected category '%s', defaulting to not_interested",
+                "Claude returned unexpected category '%s', defaulting to not_interested",
                 category,
             )
             return "not_interested"
@@ -95,11 +95,7 @@ async def generate_draft(
     lead_name: str,
     campaign_name: str,
 ) -> str:
-    """Generate a draft response for an email reply using the playbook.
-
-    Only generates drafts for actionable categories: interested, info_request,
-    not_interested.  Returns an empty string for all other categories.
-    """
+    """Generate a draft response for an email reply using the playbook."""
     if category not in ("interested", "info_request", "not_interested"):
         return ""
 
@@ -128,16 +124,16 @@ async def generate_draft(
 
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = await client.messages.create(
+            model=MODEL,
+            max_tokens=400,
+            temperature=0.7,
+            system=system_prompt,
             messages=[
-                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.7,
-            max_tokens=400,
         )
-        return response.choices[0].message.content.strip()
+        return response.content[0].text.strip()
     except Exception:
         logger.exception("Error generating draft response")
         return ""
@@ -180,16 +176,16 @@ async def generate_followup(
 
     try:
         client = _get_client()
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = await client.messages.create(
+            model=MODEL,
+            max_tokens=200,
+            temperature=0.7,
+            system=system_prompt,
             messages=[
-                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.7,
-            max_tokens=200,
         )
-        return response.choices[0].message.content.strip()
+        return response.content[0].text.strip()
     except Exception:
         logger.exception("Error generating follow-up message")
         return ""

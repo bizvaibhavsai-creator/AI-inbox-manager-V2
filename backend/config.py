@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     PLUSVIBE_API_KEY: str = ""
     PLUSVIBE_WORKSPACE_ID: str = ""
 
-    # OpenAI
-    OPENAI_API_KEY: str = ""
+    # Anthropic (Claude)
+    ANTHROPIC_API_KEY: str = ""
 
     # Webhook URL (n8n webhook for Slack notifications)
     WEBHOOK_URL: str = ""
