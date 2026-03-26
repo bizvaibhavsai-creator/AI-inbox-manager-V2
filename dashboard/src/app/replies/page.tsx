@@ -1,26 +1,38 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, ChevronLeft, ChevronRight, User, Building2, Tag } from "lucide-react";
+import {
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  Inbox,
+  Send,
+  AlertTriangle,
+  X,
+  User,
+  Building2,
+  Clock,
+  Filter,
+} from "lucide-react";
 import { getReplies, getReplyById } from "@/lib/api";
 import { Reply, ReplyDetail } from "@/lib/types";
 
 const CATEGORY_COLORS: Record<string, string> = {
-  interested: "bg-emerald-50 text-emerald-600",
-  not_interested: "bg-red-50 text-red-500",
-  ooo: "bg-amber-50 text-amber-600",
-  unsubscribe: "bg-orange-50 text-orange-500",
-  info_request: "bg-violet-50 text-violet-600",
-  wrong_person: "bg-gray-100 text-text-secondary",
-  dnc: "bg-rose-50 text-rose-600",
+  interested: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  not_interested: "bg-red-50 text-red-600 border border-red-200",
+  ooo: "bg-amber-50 text-amber-700 border border-amber-200",
+  unsubscribe: "bg-orange-50 text-orange-600 border border-orange-200",
+  info_request: "bg-violet-50 text-violet-700 border border-violet-200",
+  wrong_person: "bg-gray-50 text-gray-600 border border-gray-200",
+  dnc: "bg-rose-50 text-rose-600 border border-rose-200",
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  pending_approval: "bg-amber-50 text-amber-600",
-  approved: "bg-[#E8EAFF] text-accent",
-  rejected: "bg-red-50 text-red-500",
-  sent: "bg-emerald-50 text-emerald-600",
-  auto_handled: "bg-gray-100 text-text-secondary",
+  pending_approval: "bg-amber-50 text-amber-700 border border-amber-200",
+  approved: "bg-[#E8EAFF] text-[#0814fa] border border-[#c7caff]",
+  rejected: "bg-red-50 text-red-600 border border-red-200",
+  sent: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  auto_handled: "bg-gray-50 text-gray-600 border border-gray-200",
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -41,18 +53,22 @@ const STATUS_LABELS: Record<string, string> = {
   auto_handled: "Auto",
 };
 
-function timeAgo(dateStr: string): string {
-  const now = new Date();
+const NAV_ITEMS = [
+  { key: "", label: "Inbox", icon: Inbox },
+  { key: "sent", label: "Sent", icon: Send },
+  { key: "auto_handled", label: "Auto Handled", icon: AlertTriangle },
+];
+
+function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return date.toLocaleDateString();
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export default function RepliesPage() {
@@ -61,43 +77,47 @@ export default function RepliesPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<ReplyDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [navFilter, setNavFilter] = useState("");
 
   const perPage = 50;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const fetchReplies = useCallback(() => {
     setLoading(true);
     setError(null);
+    const statusParam = navFilter === "sent" ? "sent" : navFilter === "auto_handled" ? "auto_handled" : statusFilter || undefined;
     getReplies({
       page,
       per_page: perPage,
       search: search || undefined,
       category: categoryFilter || undefined,
-      status: statusFilter || undefined,
+      status: statusParam,
     })
-      .then((res) => {
-        setReplies(res.replies);
-        setTotal(res.total);
-      })
+      .then((res) => { setReplies(res.replies); setTotal(res.total); })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [page, search, categoryFilter, statusFilter]);
+  }, [page, search, categoryFilter, statusFilter, navFilter]);
+
+  useEffect(() => { fetchReplies(); }, [fetchReplies]);
 
   useEffect(() => {
-    fetchReplies();
-  }, [fetchReplies]);
-
-  useEffect(() => {
-    if (selectedId === null) {
-      setDetail(null);
-      return;
-    }
+    if (selectedId === null) { setDetail(null); return; }
     setDetailLoading(true);
     getReplyById(selectedId)
       .then(setDetail)
@@ -107,36 +127,49 @@ export default function RepliesPage() {
 
   const totalPages = Math.ceil(total / perPage);
 
-  const [searchInput, setSearchInput] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
   return (
-    <div className="flex h-[calc(100vh-64px)] gap-0 overflow-hidden -m-8 rounded-xl">
-      {/* Left Panel */}
-      <div className="w-2/5 border-r border-border flex flex-col bg-card">
-        {/* Search & Filters */}
-        <div className="p-4 border-b border-border space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-            <input
-              type="text"
-              placeholder="Search by name or email..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-text-primary text-[13px] placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
-            />
+    <div className="flex gap-0 -m-8 min-h-screen">
+      {/* Left Filter Sidebar */}
+      <div className="w-52 bg-card border-r border-border p-5 flex flex-col gap-6 shrink-0">
+        <nav className="space-y-1">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const isActive = navFilter === item.key;
+            return (
+              <button
+                key={item.key}
+                onClick={() => { setNavFilter(item.key); setStatusFilter(""); setPage(1); }}
+                className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg text-[13px] font-medium transition-all ${
+                  isActive ? "bg-accent-light text-accent" : "text-text-secondary hover:text-text-primary hover:bg-surface"
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Filter className="w-3.5 h-3.5 text-text-muted" />
+            <span className="text-[11px] font-medium text-text-muted uppercase tracking-wider">Filters</span>
           </div>
-          <div className="flex gap-2">
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
+              <input
+                type="text"
+                placeholder="Search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-[12px] placeholder-text-muted focus:outline-none focus:border-accent"
+              />
+            </div>
             <select
               value={categoryFilter}
               onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
-              className="flex-1 px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-[12px] focus:outline-none focus:border-accent"
+              className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-[12px] focus:outline-none focus:border-accent"
             >
               <option value="">All Categories</option>
               <option value="interested">Interested</option>
@@ -147,23 +180,45 @@ export default function RepliesPage() {
               <option value="wrong_person">Wrong Person</option>
               <option value="dnc">DNC</option>
             </select>
-            <select
-              value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-              className="flex-1 px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-[12px] focus:outline-none focus:border-accent"
-            >
-              <option value="">All Statuses</option>
-              <option value="pending_approval">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="sent">Sent</option>
-              <option value="auto_handled">Auto Handled</option>
-            </select>
+            {navFilter === "" && (
+              <select
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-text-primary text-[12px] focus:outline-none focus:border-accent"
+              >
+                <option value="">All Statuses</option>
+                <option value="pending_approval">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="sent">Sent</option>
+                <option value="auto_handled">Auto Handled</option>
+              </select>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 py-6 px-6">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-[20px] font-semibold text-text-primary">Master Inbox</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-[12px] text-text-muted">{total} replies</span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <span className="text-[12px] text-text-secondary">Page {page} of {totalPages}</span>
+                <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page <= 1} className="p-1 rounded hover:bg-surface disabled:opacity-30">
+                  <ChevronLeft className="w-4 h-4 text-text-secondary" />
+                </button>
+                <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page >= totalPages} className="p-1 rounded hover:bg-surface disabled:opacity-30">
+                  <ChevronRight className="w-4 h-4 text-text-secondary" />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Reply List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center h-40">
               <p className="text-text-muted text-[13px]">Loading replies...</p>
@@ -177,199 +232,146 @@ export default function RepliesPage() {
               <p className="text-text-muted text-[13px]">No replies found</p>
             </div>
           ) : (
-            replies.map((reply) => (
-              <div
-                key={reply.id}
-                onClick={() => setSelectedId(reply.id)}
-                className={`px-4 py-3 border-b border-border/50 cursor-pointer transition-all ${
-                  selectedId === reply.id
-                    ? "bg-accent-light border-l-2 border-l-accent"
-                    : "hover:bg-surface"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
+            <div>
+              {replies.map((reply, idx) => (
+                <div
+                  key={reply.id}
+                  onClick={() => setSelectedId(reply.id)}
+                  className={`flex items-center gap-4 px-5 py-3.5 cursor-pointer transition-all hover:bg-surface ${
+                    idx !== replies.length - 1 ? "border-b border-border/50" : ""
+                  }`}
+                >
+                  <div className="w-48 shrink-0">
                     <p className="text-[13px] font-medium text-text-primary truncate">
                       {reply.lead_name || reply.lead_email}
                     </p>
-                    <p className="text-[11px] text-text-muted truncate">
-                      {reply.lead_email}
-                    </p>
                   </div>
-                  <span className="text-[11px] text-text-muted whitespace-nowrap">
-                    {timeAgo(reply.created_at)}
-                  </span>
+
+                  <div className="flex items-center gap-1.5 w-40 shrink-0">
+                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[reply.category] || "bg-gray-50 text-gray-600"}`}>
+                      {CATEGORY_LABELS[reply.category] || reply.category}
+                    </span>
+                    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[reply.status] || "bg-gray-50 text-gray-600"}`}>
+                      {STATUS_LABELS[reply.status] || reply.status}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 min-w-0 truncate">
+                    <span className="text-[13px] text-text-primary font-medium">{reply.subject}</span>
+                    <span className="text-[13px] text-text-muted ml-2">
+                      — {reply.body?.slice(0, 80)}{reply.body && reply.body.length > 80 ? "..." : ""}
+                    </span>
+                  </div>
+
+                  <div className="w-20 text-right shrink-0">
+                    <span className="text-[12px] text-text-muted">{formatDate(reply.created_at)}</span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-text-secondary mt-1 truncate">
-                  {reply.subject}
-                </p>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_COLORS[reply.category] || "bg-gray-100 text-text-secondary"}`}>
-                    {CATEGORY_LABELS[reply.category] || reply.category}
-                  </span>
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[reply.status] || "bg-gray-100 text-text-secondary"}`}>
-                    {STATUS_LABELS[reply.status] || reply.status}
-                  </span>
-                </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-border flex items-center justify-between">
-            <span className="text-[11px] text-text-muted">{total} replies</span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage(Math.max(1, page - 1))}
-                disabled={page <= 1}
-                className="p-1 rounded hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-4 h-4 text-text-secondary" />
-              </button>
-              <span className="text-[11px] text-text-secondary">{page} / {totalPages}</span>
-              <button
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages}
-                className="p-1 rounded hover:bg-surface disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="w-4 h-4 text-text-secondary" />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Right Panel */}
-      <div className="w-3/5 overflow-y-auto bg-surface p-6">
-        {selectedId === null ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <p className="text-text-muted text-[14px]">Select a reply to view details</p>
-              <p className="text-text-muted text-[12px] mt-1">Click on any reply in the list</p>
-            </div>
-          </div>
-        ) : detailLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-text-muted text-[13px]">Loading...</p>
-          </div>
-        ) : detail ? (
-          <div className="space-y-5 max-w-3xl">
-            {/* Lead Info */}
-            <div className="bg-card rounded-xl p-6 border border-border shadow-sm">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
+      {/* Detail Modal */}
+      {selectedId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setSelectedId(null)} />
+          <div className="relative bg-card rounded-2xl shadow-xl border border-border w-full max-w-2xl max-h-[85vh] overflow-y-auto mx-4">
+            <button onClick={() => setSelectedId(null)} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-surface text-text-muted hover:text-text-primary transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+            {detailLoading ? (
+              <div className="flex items-center justify-center h-60">
+                <p className="text-text-muted text-[13px]">Loading...</p>
+              </div>
+            ) : detail ? (
+              <div className="p-6 space-y-5">
+                <div className="pr-8">
+                  <div className="flex items-center gap-2 mb-1">
                     <div className="p-1.5 rounded-md bg-accent-light">
                       <User className="w-4 h-4 text-accent" />
                     </div>
-                    <h2 className="text-[16px] font-semibold text-text-primary">
-                      {detail.lead_name || "Unknown"}
-                    </h2>
+                    <h2 className="text-[17px] font-semibold text-text-primary">{detail.lead_name || "Unknown"}</h2>
                   </div>
                   <p className="text-[13px] text-text-secondary ml-9">{detail.lead_email}</p>
                   {detail.lead_company && (
-                    <div className="flex items-center gap-2 ml-9">
+                    <div className="flex items-center gap-2 ml-9 mt-1">
                       <Building2 className="w-3.5 h-3.5 text-text-muted" />
-                      <p className="text-[12px] text-text-secondary">{detail.lead_company}</p>
+                      <span className="text-[12px] text-text-secondary">{detail.lead_company}</span>
                     </div>
                   )}
+                  <div className="flex items-center gap-2 mt-3 ml-9 flex-wrap">
+                    <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full ${CATEGORY_COLORS[detail.category] || ""}`}>
+                      {CATEGORY_LABELS[detail.category] || detail.category}
+                    </span>
+                    <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded-full ${STATUS_COLORS[detail.status] || ""}`}>
+                      {STATUS_LABELS[detail.status] || detail.status}
+                    </span>
+                    {detail.campaign_name && (
+                      <span className="text-[11px] font-medium px-2.5 py-0.5 rounded-full bg-accent-light text-accent border border-[#c7caff]">
+                        {detail.campaign_name}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${CATEGORY_COLORS[detail.category] || "bg-gray-100 text-text-secondary"}`}>
-                    {CATEGORY_LABELS[detail.category] || detail.category}
-                  </span>
-                  <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full ${STATUS_COLORS[detail.status] || "bg-gray-100 text-text-secondary"}`}>
-                    {STATUS_LABELS[detail.status] || detail.status}
-                  </span>
+
+                <div className="bg-surface rounded-xl px-4 py-3">
+                  <p className="text-[11px] text-text-muted uppercase tracking-wider mb-1">Subject</p>
+                  <p className="text-[14px] text-text-primary font-medium">{detail.subject}</p>
                 </div>
-              </div>
 
-              {detail.campaign_name && (
-                <div className="mt-4 flex items-center gap-2 ml-9">
-                  <Tag className="w-3.5 h-3.5 text-accent" />
-                  <span className="text-[12px] text-accent bg-accent-light px-2.5 py-0.5 rounded-full font-medium">
-                    {detail.campaign_name}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Subject */}
-            <div className="px-1">
-              <h3 className="text-[11px] font-medium text-text-muted uppercase tracking-wider mb-1">Subject</h3>
-              <p className="text-[14px] text-text-primary">{detail.subject}</p>
-            </div>
-
-            {/* Original Reply */}
-            <div className="bg-card rounded-xl p-6 border border-border shadow-sm">
-              <h3 className="text-[11px] font-medium text-text-muted uppercase tracking-wider mb-3">Original Reply</h3>
-              <div className="text-[13px] text-text-secondary whitespace-pre-wrap leading-relaxed">
-                {detail.body}
-              </div>
-            </div>
-
-            {/* AI Draft */}
-            {detail.ai_draft && (
-              <div className="bg-card rounded-xl p-6 border border-accent/20 shadow-sm">
-                <h3 className="text-[11px] font-medium text-accent uppercase tracking-wider mb-3">AI Draft Response</h3>
-                <div className="text-[13px] text-text-secondary whitespace-pre-wrap leading-relaxed">
-                  {detail.ai_draft}
-                </div>
-              </div>
-            )}
-
-            {/* Timestamps */}
-            <div className="bg-card rounded-xl p-5 border border-border shadow-sm">
-              <div className="grid grid-cols-2 gap-4 text-[13px]">
                 <div>
-                  <p className="text-[11px] text-text-muted uppercase tracking-wider mb-1">Received</p>
-                  <p className="text-text-primary">{new Date(detail.created_at).toLocaleString()}</p>
+                  <p className="text-[11px] text-text-muted uppercase tracking-wider mb-2 px-1">Original Reply</p>
+                  <div className="bg-surface rounded-xl px-4 py-4 text-[13px] text-text-secondary whitespace-pre-wrap leading-relaxed">{detail.body}</div>
                 </div>
-                <div>
-                  <p className="text-[11px] text-text-muted uppercase tracking-wider mb-1">Sent</p>
-                  <p className="text-text-primary">
-                    {detail.sent_at ? new Date(detail.sent_at).toLocaleString() : "Not sent yet"}
-                  </p>
-                </div>
-              </div>
-            </div>
 
-            {/* Follow-ups */}
-            {detail.follow_ups && detail.follow_ups.length > 0 && (
-              <div className="bg-card rounded-xl p-6 border border-border shadow-sm">
-                <h3 className="text-[11px] font-medium text-text-muted uppercase tracking-wider mb-4">
-                  Follow-ups ({detail.follow_ups.length})
-                </h3>
-                <div className="space-y-4">
-                  {detail.follow_ups.map((fu, idx) => (
-                    <div key={fu.id} className="border-l-2 border-border pl-4">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[11px] text-text-muted">#{idx + 1}</span>
-                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[fu.status] || "bg-gray-100 text-text-secondary"}`}>
-                          {STATUS_LABELS[fu.status] || fu.status}
-                        </span>
-                      </div>
-                      {fu.body && (
-                        <p className="text-[12px] text-text-secondary whitespace-pre-wrap">{fu.body}</p>
-                      )}
-                      <p className="text-[11px] text-text-muted mt-1">
-                        {new Date(fu.created_at).toLocaleDateString()}
-                        {fu.sent_at && ` · Sent: ${new Date(fu.sent_at).toLocaleDateString()}`}
-                      </p>
+                {detail.ai_draft && (
+                  <div>
+                    <p className="text-[11px] text-accent uppercase tracking-wider mb-2 px-1 font-medium">AI Draft Response</p>
+                    <div className="bg-accent-light/50 border border-accent/15 rounded-xl px-4 py-4 text-[13px] text-text-secondary whitespace-pre-wrap leading-relaxed">{detail.ai_draft}</div>
+                  </div>
+                )}
+
+                <div className="flex gap-6 text-[12px] px-1">
+                  <div>
+                    <span className="text-text-muted">Received: </span>
+                    <span className="text-text-primary">{new Date(detail.created_at).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-text-muted">Sent: </span>
+                    <span className="text-text-primary">{detail.sent_at ? new Date(detail.sent_at).toLocaleString() : "Not sent yet"}</span>
+                  </div>
+                </div>
+
+                {detail.follow_ups && detail.follow_ups.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-text-muted uppercase tracking-wider mb-2 px-1">Follow-ups ({detail.follow_ups.length})</p>
+                    <div className="space-y-2">
+                      {detail.follow_ups.map((fu, idx) => (
+                        <div key={fu.id} className="bg-surface rounded-lg px-4 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-text-muted">#{idx + 1}</span>
+                            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[fu.status] || ""}`}>
+                              {STATUS_LABELS[fu.status] || fu.status}
+                            </span>
+                            {fu.body && <span className="text-[12px] text-text-secondary truncate max-w-xs">{fu.body}</span>}
+                          </div>
+                          <span className="text-[11px] text-text-muted">{new Date(fu.created_at).toLocaleDateString()}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-40">
+                <p className="text-red-500 text-[13px]">Failed to load details</p>
               </div>
             )}
           </div>
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-red-500 text-[13px]">Failed to load reply details</p>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
